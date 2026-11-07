@@ -1,37 +1,49 @@
 # idor-check
 
-**Test a web app for IDOR with two test accounts.** idor-check signs in as user A and user B, then asks for B's records as A and as a logged-out visitor. If the server hands them over, you get the exact request and response as proof.
+**A Claude Code skill that tests your app for IDOR.** Every app stores and checks access differently, so the skill starts from your code: Claude finds the routes and database queries that take an ID, works out who should see what, and then proves each hole with two test accounts. It reports only what it proved, with the request that got in and a fix.
 
-It also checks admin-only routes, Supabase tables that the public anon key can read or write, users promoting themselves to admin, and secrets shipped in the front-end bundle.
-
-- One file, no dependencies, Node 18+
-- Read-only by default; write tests only with `--writes`
-- Talks only to local or private addresses unless you pass `--i-own-this-app`
-- Exit code 1 when it finds a hole, so it can run in CI against staging
+The skill comes with a small helper script, `idor-check.mjs`, that does the proving: it signs in as user A and user B and asks for B's records as A and as a logged-out visitor. It also checks admin routes, Supabase tables open to the public key, users promoting themselves to admin, and secrets shipped in the front-end bundle.
 
 > [!IMPORTANT]
 > Only test apps you own or have written permission to test. Use a local or staging copy with throwaway test accounts, never real customer data.
 
-## Quick start
+## Use it
+
+Open Claude Code inside your project and paste:
+
+```
+Clone https://github.com/Yxsuf1/idor-check and follow the skill in .claude/skills/idor-check/SKILL.md to check this project for IDOR. Use two test accounts on my local or staging copy, show me proof for every hole you find, and only fix things after I say yes.
+```
+
+Or install the skill once and ask for it by name:
 
 ```bash
 git clone https://github.com/Yxsuf1/idor-check
-cd idor-check
-cp examples/my-app.json my-app.local.json   # git-ignored
+cp -r idor-check/.claude/skills/idor-check your-project/.claude/skills/
 ```
 
-1. Run your app locally or on staging. Sign up two test accounts, A and B, with passwords of 12+ characters.
-2. As B, create something private (an invoice, a note, an upload) and copy its ID.
-3. In `my-app.local.json`, set `baseUrl`, the two logins under `accounts`, and B's ID under `routes`.
-4. Run it:
+### What the skill does
+
+1. **Maps access.** Reads how login works, the database rules, and every entry point, then writes down who should see what. It asks you when a rule is unclear, because shared-by-design is not a bug.
+2. **Follows every ID** through URL paths, query strings, bodies, server actions and Supabase queries, for reads, edits, deletes, downloads and bulk actions.
+3. **Proves it.** Fills in the helper script's config with the routes it found and your two test accounts, runs it read-only, then with write tests on test data if you agree. Routes the script can't replay (POST, file downloads, GraphQL) it tests by hand the same way.
+4. **Reports** what it proved, what it saw in the code but didn't run, and what it couldn't decide, each with file, line, evidence and fix.
+5. **Fixes only after you say yes**, adds a test where A tries B's records, and runs the check again.
+
+It doesn't deploy or change database rules without asking.
+
+## The helper script
+
+You can also run the script yourself. It's one file, Node 18+, no dependencies, read-only unless you pass `--writes`, and it exits with code 1 when it finds a hole, so it can run in CI against staging.
 
 ```bash
+cp examples/my-app.json my-app.local.json   # git-ignored; set baseUrl, the two logins and B's record ID
 APP_A_PASSWORD=... APP_B_PASSWORD=... node idor-check.mjs --config my-app.local.json
 ```
 
-On test data, add `--writes` to also test whether A can edit B's rows or make themselves admin.
+Use test passwords of 12+ characters. Add `--writes` on test data to check whether A can edit B's rows or make themselves admin.
 
-## Example output
+### Example output
 
 From a run against a deliberately vulnerable Supabase test app:
 
@@ -60,7 +72,7 @@ PASS   cross-account: A can't see B's rows in "notes" (asked for them directly, 
 | `UNSURE` | No verdict: server error, login failed, wrong ID, B has no rows there, or A got data that doesn't match B's. Never counted as a pass |
 | `INFO` | Worth knowing, not a finding |
 
-## What it checks
+### What it checks
 
 | Check | How |
 |---|---|
@@ -72,7 +84,7 @@ PASS   cross-account: A can't see B's rows in "notes" (asked for them directly, 
 | Cross-account writes (`--writes`) | Writes a row's current value back into one of B's rows, as A |
 | Self-promotion (`--writes`) | Sets A's own `role` / `is_admin`, restores it, reads it back to confirm |
 
-## Configuration
+### Configuration
 
 ```json
 {
@@ -101,7 +113,7 @@ PASS   cross-account: A can't see B's rows in "notes" (asked for them directly, 
 
 `examples/supabase-two-accounts.json` is a full Supabase example.
 
-## Options
+### Options
 
 ```
 node idor-check.mjs --config <file> [--writes] [--i-own-this-app] [--json <report.json>] [--delay <ms>]
@@ -115,7 +127,7 @@ node idor-check.mjs --config <file> [--writes] [--i-own-this-app] [--json <repor
 | `--json` | Also write the results as JSON |
 | `--delay` | Milliseconds between requests |
 
-## Safety
+### Safety
 
 - **Targets.** Every hostname is resolved, and all of its addresses must be loopback or private (127/8, 10/8, 172.16/12, 192.168/16, 0.0.0.0, ::1, fc00::/7) unless you pass `--i-own-this-app`. Cloud metadata addresses (169.254/16) are never treated as private. The checked addresses are pinned and reused for every request, so DNS can't change in between.
 - **One origin per consent.** Each request is checked against the configured origins before it is sent. A Supabase project found only in the page is used only if it is local; a hosted one must be in your config.
@@ -123,9 +135,9 @@ node idor-check.mjs --config <file> [--writes] [--i-own-this-app] [--json <repor
 - **Writes.** Off by default. The edit test writes a row's current value back, so data stays the same, but database triggers and webhooks can still fire. The admin test restores the old role and confirms it; if it can't, it prints exactly what to restore.
 - **Redaction.** Recognised keys, tokens and your test passwords are masked in the output and the JSON report. Use 12+ character test passwords so they mask reliably. Not every secret can be recognised, and your test accounts' data is shown as proof, so read the output before sharing it.
 
-## Limitations
+### Limitations
 
-idor-check tests GET routes and Supabase tables. It does not test POST, PUT or DELETE routes, file downloads, GraphQL, or team-to-team access. Test those by hand the same way: A's session, B's ID, change only the ID, then check both the response and what was saved.
+The script tests GET routes and Supabase tables. It does not test POST, PUT or DELETE routes, file downloads, GraphQL, or team-to-team access. Test those by hand the same way: A's session, B's ID, change only the ID, then check both the response and what was saved.
 
 A clean run means these checks passed, not that the app is secure.
 
@@ -137,13 +149,9 @@ The fix is the same everywhere: the server takes the user from the verified sess
 - For updates, put the ownership check in the query itself (`where id = ? and owner_id = ?`).
 - Supabase: enable RLS on every table, drop `using (true)` policies on private tables (policies combine with OR), add select, insert, update and delete policies tied to `auth.uid()`, use `with check` on updates, and keep `service_role` on the server.
 
-Then add a test that signs in as A and tries B's records, and run idor-check again.
+Then add a test that signs in as A and tries B's records, and run the check again.
 
 A step-by-step walkthrough, including manual testing in the browser: [How to test your app for IDOR](https://vaultxsec.com/guides/how-to-test-for-idor/).
-
-## Claude Code skill
-
-`.claude/skills/idor-check/SKILL.md` is a Claude Code skill. Copy it into your project's `.claude/skills/` and ask Claude Code to check the app for IDOR. It maps who should see what from your code, follows every ID through the handlers and database rules, runs idor-check with two test accounts, and reports only what it proved. It does not deploy or change database rules without asking.
 
 ## Development
 
