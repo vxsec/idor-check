@@ -1,40 +1,41 @@
 # idor-check
 
-**A Claude Code skill that tests your app for IDOR.** Every app stores and checks access differently, so the skill starts from your code: Claude finds the routes and database queries that take an ID, works out who should see what, and then proves each hole with two test accounts. It reports only what it proved, with the request that got in and a fix.
+**Instructions and a test script that let Claude Code check your app for IDOR and fix it.** Paste this into Claude Code inside your project:
 
-The skill comes with a small helper script, `idor-check.mjs`, that does the proving: it signs in as user A and user B and asks for B's records as A and as a logged-out visitor. It also checks admin routes, Supabase tables open to the public key, users promoting themselves to admin, and secrets shipped in the front-end bundle.
+```
+Read https://github.com/Yxsuf1/idor-check and follow its AGENTS.md to check this app for IDOR. Show me proof for anything you find, and fix it after I say yes.
+```
+
+IDOR is when one user can read or change another user's data by changing an ID. Every app checks access differently, so there is no one-size scanner for it. This repo gives Claude a procedure that starts from your code instead:
+
+1. **Map access.** Claude reads how login works, your database rules, and every route, server action and query that takes an ID, and writes down who should see what. It asks you when a rule is unclear, because shared-by-design is not a bug.
+2. **Prove it.** It runs `idor-check.mjs` with two throwaway test accounts on your local or staging copy: signed in as user A, it asks for user B's records, and does the same logged out. Routes the script can't replay (POST, downloads, GraphQL) it tests by hand the same way.
+3. **Report.** Proven holes come with the request that got in and what came back. What it saw in the code but couldn't run, and what it couldn't decide, are listed separately.
+4. **Ask, fix, re-test.** It changes nothing until you say yes. Then it fixes the code or database rules, adds a test where A tries B's records, and re-runs the same checks to show each hole now refused.
+
+It never deploys. The full procedure is in [AGENTS.md](AGENTS.md) and [SKILL.md](.claude/skills/idor-check/SKILL.md).
 
 > [!IMPORTANT]
 > Only test apps you own or have written permission to test. Use a local or staging copy with throwaway test accounts, never real customer data.
 
-## Use it
+### Install as a skill
 
-Open Claude Code inside your project and paste:
-
-```
-Clone https://github.com/Yxsuf1/idor-check and follow the skill in .claude/skills/idor-check/SKILL.md to check this project for IDOR. Use two test accounts on my local or staging copy, show me proof for every hole you find, and only fix things after I say yes.
-```
-
-Or install the skill once and ask for it by name:
+To keep it in a project, copy the skill folder; it fetches the script itself when it runs:
 
 ```bash
 git clone https://github.com/Yxsuf1/idor-check
 cp -r idor-check/.claude/skills/idor-check your-project/.claude/skills/
 ```
 
-### What the skill does
+Then ask Claude Code to "check this app for IDOR".
 
-1. **Maps access.** Reads how login works, the database rules, and every entry point, then writes down who should see what. It asks you when a rule is unclear, because shared-by-design is not a bug.
-2. **Follows every ID** through URL paths, query strings, bodies, server actions and Supabase queries, for reads, edits, deletes, downloads and bulk actions.
-3. **Proves it.** Fills in the helper script's config with the routes it found and your two test accounts, runs it read-only, then with write tests on test data if you agree. Routes the script can't replay (POST, file downloads, GraphQL) it tests by hand the same way.
-4. **Reports** what it proved, what it saw in the code but didn't run, and what it couldn't decide, each with file, line, evidence and fix.
-5. **Fixes only after you say yes**, adds a test where A tries B's records, and runs the check again.
+### Testing by hand
 
-It doesn't deploy or change database rules without asking.
+No Claude Code? [How to test your app for IDOR](https://vaultxsec.com/guides/how-to-test-for-idor/) walks through a five-minute two-account test, a Supabase RLS check, and a fix prompt you can give any AI coding tool.
 
 ## The helper script
 
-You can also run the script yourself. It's one file, Node 18+, no dependencies, read-only unless you pass `--writes`, and it exits with code 1 when it finds a hole, so it can run in CI against staging.
+`idor-check.mjs` is what Claude runs in step 2. You can also run it yourself. It's one file, Node 18+, no dependencies, read-only unless you pass `--writes`, and it exits with code 1 when it finds a hole, so it can run in CI against staging.
 
 ```bash
 cp examples/my-app.json my-app.local.json   # git-ignored; set baseUrl, the two logins and B's record ID
@@ -150,8 +151,6 @@ The fix is the same everywhere: the server takes the user from the verified sess
 - Supabase: enable RLS on every table, drop `using (true)` policies on private tables (policies combine with OR), add select, insert, update and delete policies tied to `auth.uid()`, use `with check` on updates, and keep `service_role` on the server.
 
 Then add a test that signs in as A and tries B's records, and run the check again.
-
-A step-by-step walkthrough, including manual testing in the browser: [How to test your app for IDOR](https://vaultxsec.com/guides/how-to-test-for-idor/).
 
 ## Development
 

@@ -278,12 +278,19 @@ const OWNER_COLS = ["owner_id", "user_id", "created_by", "author_id", "profile_i
 const ESCALATE = { role: "admin", is_admin: true, admin: true, is_superuser: true, is_staff: true };
 async function supabaseTables() {
   if (cfg.supabase?.tables?.length) return cfg.supabase.tables.map((t) => ({ name: t, pk: null }));
-  const r = await http("GET", `${SB}/rest/v1/`, { apikey: ANON, authorization: `Bearer ${ANON}` });
-  if (!r.json?.paths) { report("UNSURE", "supabase", `couldn't list tables (${r.status}). Add "tables": [...] under "supabase" in your config.`); return []; }
-  return Object.keys(r.json.paths).filter((p) => /^\/[A-Za-z0-9_]+$/.test(p)).map((p) => {
-    const name = p.slice(1), props = r.json.definitions?.[name]?.properties || {};
-    return { name, pk: Object.keys(props).find((k) => /<pk\/>/.test(props[k].description || "")) || null };
-  });
+  // The API only lists tables the caller has rights on, so a locked-down database can look empty to the
+  // public key. List as the public key and as each test account, and merge.
+  const found = new Map(); let lastStatus = 0;
+  for (const h of [{ apikey: ANON, authorization: `Bearer ${ANON}` }, accounts.a && sbHeaders(accounts.a), accounts.b && sbHeaders(accounts.b)].filter(Boolean)) {
+    const r = await http("GET", `${SB}/rest/v1/`, h); lastStatus = r.status;
+    for (const p of Object.keys(r.json?.paths || {})) {
+      if (!/^\/[A-Za-z0-9_]+$/.test(p) || found.has(p.slice(1))) continue;
+      const name = p.slice(1), props = r.json.definitions?.[name]?.properties || {};
+      found.set(name, { name, pk: Object.keys(props).find((k) => /<pk\/>/.test(props[k].description || "")) || null });
+    }
+  }
+  if (!found.size) report("UNSURE", "supabase", `no tables could be listed (${lastStatus}), so no table was checked. Add "tables": [...] under "supabase" in your config and run again.`);
+  return [...found.values()];
 }
 const rows = (r) => (Array.isArray(r.json) ? r.json : []);
 const q = (t, s) => `${SB}/rest/v1/${t}?${s}`;

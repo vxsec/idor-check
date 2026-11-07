@@ -48,16 +48,22 @@ A query without an owner filter isn't automatically a bug. The check may live in
 
 ## 3. Prove it with the script
 
-The repo includes `idor-check.mjs`. Node 18+, no installs. Set it up with the user:
+The helper is `idor-check.mjs` at the root of https://github.com/Yxsuf1/idor-check. Node 18+, no installs. If it isn't already on disk, clone the repo into a temporary folder outside the user's project, so nothing is added to their code:
+
+```
+git clone --depth 1 https://github.com/Yxsuf1/idor-check "${TMPDIR:-/tmp}/idor-check"
+```
+
+Keep the config in that folder too (it holds test logins). Set it up with the user:
 
 1. Run the app locally or on staging. Make two throwaway test accounts, A and B, and give B at least one private record in each table that matters (an invoice, a note, a file).
-2. Copy `examples/my-app.json` to `my-app.local.json` (git-ignored) and fill in:
+2. Copy `examples/my-app.json` to `my-app.local.json` in the cloned folder and fill in:
    - `baseUrl`: the app's local or staging address.
    - `accounts.a` and `accounts.b`: email and password (Supabase login), or a `token`, or raw `headers`. Use `${ENV_NAME}` for passwords so they stay out of files.
    - `routes`: the routes you found in step 2 that take an ID, with one of B's real IDs. The script loads it as B, then as A, then logged out, and compares.
    - `adminRoutes`: routes only admins should reach.
    - `supabase.url`: required for a hosted Supabase project (the script won't use a hosted project it only found in the page). For a local Supabase it's found automatically. It finds the anon key itself.
-3. Run it read-only first:
+3. Run it read-only first, from the cloned folder:
    `node idor-check.mjs --config my-app.local.json`
 4. If that's clean, or the user wants edits and self-promotion tested, run it on test data with writes on:
    `node idor-check.mjs --config my-app.local.json --writes`
@@ -95,7 +101,11 @@ Don't invent findings, severities or results. If nothing turned up, list what yo
 - Supabase: RLS on for every table. Select, insert, update and delete policies tied to `auth.uid()`. Drop `using (true)` on every table that isn't meant to be public. `with check` on updates. Keep service_role on the server.
 - Keep sharing that's meant to work, working.
 
-Then add a test that logs in as A and tries B's records, watch it fail on the old code, apply the fix, and run idor-check again. Report the actual commands and results. Don't deploy.
+Then add a test that logs in as A and tries B's records, watch it fail on the old code, apply the fix, and run idor-check again with the same config.
+
+## 6. Prove each fix
+
+Re-run every check that failed, plus the ones you tested by hand. Show each former FAIL next to its new result. A hole counts as closed only when the same request is now refused (PASS), not when the code looks right. If anything is still FAIL or UNSURE, say so plainly. Report the actual commands and results. Don't deploy.
 
 ## References
 
