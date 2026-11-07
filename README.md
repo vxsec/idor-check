@@ -3,7 +3,7 @@
 **Instructions and a test script that let your AI coding agent check your app for IDOR and fix it.** Paste this into an agent that can run commands (for example Claude Code, Cursor or Codex) inside your project:
 
 ```
-Read https://github.com/Yxsuf1/idor-check and follow its AGENTS.md to check this app for IDOR. Show me proof for anything you find, and fix it after I say yes.
+Read https://github.com/vxsec/idor-check and follow its AGENTS.md to check this app for IDOR. Show me proof for anything you find, and fix it after I say yes.
 ```
 
 IDOR is when one user can read or change another user's data by changing an ID. Every app checks access differently, so there is no one-size scanner for it. This repo gives your agent a procedure that starts from your code instead:
@@ -23,7 +23,7 @@ It never deploys. The procedure is in [AGENTS.md](AGENTS.md), the shared instruc
 Optional. To keep it in a project, copy the skill folder; it fetches the script itself when it runs:
 
 ```bash
-git clone https://github.com/Yxsuf1/idor-check
+git clone https://github.com/vxsec/idor-check
 cp -r idor-check/.claude/skills/idor-check your-project/.claude/skills/
 ```
 

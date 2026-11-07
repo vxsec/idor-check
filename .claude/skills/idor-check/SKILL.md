@@ -48,10 +48,10 @@ A query without an owner filter isn't automatically a bug. The check may live in
 
 ## 3. Prove it with the script
 
-The helper is `idor-check.mjs` at the root of https://github.com/Yxsuf1/idor-check. Node 18+, no installs. If it isn't already on disk, clone the repo into a temporary folder outside the user's project, so nothing is added to their code:
+The helper is `idor-check.mjs` at the root of https://github.com/vxsec/idor-check. Node 18+, no installs. If it isn't already on disk, clone the repo into a temporary folder outside the user's project, so nothing is added to their code:
 
 ```
-git clone --depth 1 https://github.com/Yxsuf1/idor-check "${TMPDIR:-/tmp}/idor-check"
+git clone --depth 1 https://github.com/vxsec/idor-check "${TMPDIR:-/tmp}/idor-check"
 ```
 
 Keep the config in that folder too (it holds test logins). Set it up with the user:
