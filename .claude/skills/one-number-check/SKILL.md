@@ -5,7 +5,7 @@ description: Check an app for the one-number hack (IDOR / broken object-level au
 
 # One-number check
 
-From the reel where changing one number in a link showed a stranger's bank statement. Yusuf | VXSec, vaultxsec.com.
+From the video where changing one number in a link showed a stranger's bank statement. Yusuf | VXSec, vaultxsec.com.
 
 The bug in one line: the app checks that you're logged in, but never checks that the thing you asked for is yours. Your job is to find every place that's true in this app, prove it, and fix it. Don't hand back a generic checklist instead of looking.
 
