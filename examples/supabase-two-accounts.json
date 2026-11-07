@@ -1,0 +1,12 @@
+{
+  "baseUrl": "http://127.0.0.1:8787",
+  "supabase": { "url": "http://127.0.0.1:8787" },
+  "accounts": {
+    "a": { "email": "alice@lab.test", "password": "${LAB_A_PASSWORD}" },
+    "b": { "email": "bob@lab.test", "password": "${LAB_B_PASSWORD}" }
+  },
+  "routes": [
+    { "path": "/rest/v1/invoices?id=eq.{id}", "id": "3", "ownedBy": "b" }
+  ],
+  "adminRoutes": ["/api/admin/users", "/api/admin/export"]
+}

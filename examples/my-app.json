@@ -1,0 +1,12 @@
+{
+  "baseUrl": "http://localhost:3000",
+  "accounts": {
+    "a": { "email": "test-a@example.com", "password": "${APP_A_PASSWORD}" },
+    "b": { "email": "test-b@example.com", "password": "${APP_B_PASSWORD}" }
+  },
+  "routes": [
+    { "path": "/api/invoices/{id}", "id": "PUT-ONE-OF-B'S-IDS-HERE", "ownedBy": "b" }
+  ],
+  "adminRoutes": ["/api/admin/users"],
+  "supabase": {}
+}
