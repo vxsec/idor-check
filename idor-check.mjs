@@ -246,7 +246,7 @@ async function checkRoutes() {
       else if (o >= 0.5) report("FAIL", "cross-account", `${who} gets ${owner.label}'s record at ${path}.`, proofOf(who, method, url, r));
       else if (o > 0) report("UNSURE", "cross-account", `${who} gets part of ${owner.label}'s record at ${path} (${Math.round(o * 100)}% of its values). Check by hand.`, proofOf(who, method, url, r));
       else if (denied(r) || (ok2xx(r) && (isEmpty(r) || errorShaped(r.json)))) report("PASS", "cross-account", `${who} can't get ${owner.label}'s record at ${path} (${statusWord(r)}).`);
-      else if (hasData(r)) report("PASS", "cross-account", `${who} gets an answer at ${path}, but none of ${owner.label}'s data is in it (${r.status}).`);
+      else if (hasData(r)) report("UNSURE", "cross-account", `${who} gets data at ${path}, but none of it matches what ${owner.label} sees. It may be ${who.startsWith("as") ? "their own" : "public"} data or a different view of ${owner.label}'s record. Check by hand.`, proofOf(who, method, url, r));
       else report("UNSURE", "cross-account", `${who} at ${path}: got ${statusWord(r)}. An error isn't proof either way.`, proofOf(who, method, url, r));
     }
   }

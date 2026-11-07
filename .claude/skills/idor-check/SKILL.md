@@ -56,7 +56,7 @@ The repo includes `idor-check.mjs`. Node 18+, no installs. Set it up with the us
    - `accounts.a` and `accounts.b`: email and password (Supabase login), or a `token`, or raw `headers`. Use `${ENV_NAME}` for passwords so they stay out of files.
    - `routes`: the routes you found in step 2 that take an ID, with one of B's real IDs. The script loads it as B, then as A, then logged out, and compares.
    - `adminRoutes`: routes only admins should reach.
-   - `supabase.url`: only if the script can't find it in the page. It finds the anon key itself.
+   - `supabase.url`: required for a hosted Supabase project (the script won't use a hosted project it only found in the page). For a local Supabase it's found automatically. It finds the anon key itself.
 3. Run it read-only first:
    `node idor-check.mjs --config my-app.local.json`
 4. If that's clean, or the user wants edits and self-promotion tested, run it on test data with writes on:
@@ -92,7 +92,7 @@ Don't invent findings, severities or results. If nothing turned up, list what yo
 - Take the user's identity from the verified session, never from the request.
 - Check the record and the action on the server or in the database. For edits, put the check inside the update itself (`where id = ? and owner_id = ?`), not in a separate lookup first.
 - Block changes to owner, team and role columns unless the user is allowed.
-- Supabase: RLS on for every table. Select, insert, update and delete policies tied to `auth.uid()`. Drop every `using (true)`. `with check` on updates. Keep service_role on the server.
+- Supabase: RLS on for every table. Select, insert, update and delete policies tied to `auth.uid()`. Drop `using (true)` on every table that isn't meant to be public. `with check` on updates. Keep service_role on the server.
 - Keep sharing that's meant to work, working.
 
 Then add a test that logs in as A and tries B's records, watch it fail on the old code, apply the fix, and run idor-check again. Report the actual commands and results. Don't deploy.

@@ -57,7 +57,7 @@ PASS   cross-account: A can't see B's rows in "notes" (asked for them directly, 
 |---|---|
 | `FAIL` | A hole, shown with the request that got in and the first 240 characters of the response |
 | `PASS` | Blocked |
-| `UNSURE` | No verdict: server error, login failed, wrong ID, or B has no rows there. Never counted as a pass |
+| `UNSURE` | No verdict: server error, login failed, wrong ID, B has no rows there, or A got data that doesn't match B's. Never counted as a pass |
 | `INFO` | Worth knowing, not a finding |
 
 ## What it checks
@@ -67,7 +67,7 @@ PASS   cross-account: A can't see B's rows in "notes" (asked for them directly, 
 | Cross-account reads | Loads each configured record as B (the owner), then as A, then logged out, and compares |
 | Admin routes | Calls each route in `adminRoutes` as A and logged out |
 | Secrets in the bundle | Reads the page and its scripts. Flags Supabase `service_role` keys, Stripe, OpenAI, Anthropic, AWS, GitHub, Slack and email-provider keys, private keys, and named tokens. The app's own tokens are tried against the admin routes; third-party keys are reported, never used |
-| Open Supabase tables | Reads every table with only the anon key. Tables that are public on purpose go in `supabase.publicTables` |
+| Open Supabase tables | Reads each table the Supabase API lists (or `supabase.tables`) with only the anon key. Tables that are public on purpose go in `supabase.publicTables` |
 | Supabase cross-account reads | Asks for rows A doesn't own, as A, after confirming B has rows there |
 | Cross-account writes (`--writes`) | Writes a row's current value back into one of B's rows, as A |
 | Self-promotion (`--writes`) | Sets A's own `role` / `is_admin`, restores it, reads it back to confirm |
@@ -117,7 +117,7 @@ node idor-check.mjs --config <file> [--writes] [--i-own-this-app] [--json <repor
 
 ## Safety
 
-- **Targets.** Every hostname is resolved, and all of its addresses must be loopback or private (127/8, 10/8, 172.16/12, 192.168/16, ::1, fc00::/7) unless you pass `--i-own-this-app`. Cloud metadata addresses (169.254/16) are never treated as private. The checked addresses are pinned and reused for every request, so DNS can't change in between.
+- **Targets.** Every hostname is resolved, and all of its addresses must be loopback or private (127/8, 10/8, 172.16/12, 192.168/16, 0.0.0.0, ::1, fc00::/7) unless you pass `--i-own-this-app`. Cloud metadata addresses (169.254/16) are never treated as private. The checked addresses are pinned and reused for every request, so DNS can't change in between.
 - **One origin per consent.** Each request is checked against the configured origins before it is sent. A Supabase project found only in the page is used only if it is local; a hosted one must be in your config.
 - **Pace.** One request at a time, 300 ms apart, at most 400 requests.
 - **Writes.** Off by default. The edit test writes a row's current value back, so data stays the same, but database triggers and webhooks can still fire. The admin test restores the old role and confirms it; if it can't, it prints exactly what to restore.
