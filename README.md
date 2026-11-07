@@ -148,7 +148,7 @@ The fix is the same everywhere: the server takes the user from the verified sess
 
 - Never trust a user ID, team ID or role sent from the browser.
 - For updates, put the ownership check in the query itself (`where id = ? and owner_id = ?`).
-- Supabase: enable RLS on every table, drop `using (true)` policies on private tables (policies combine with OR), add select, insert, update and delete policies tied to `auth.uid()`, use `with check` on updates, and keep `service_role` on the server.
+- Supabase: enable RLS on every table, drop `using (true)` policies on private tables (policies combine with OR), add only the policies the app needs (select, insert, update or delete), each tied to `auth.uid()`, use `with check` on updates, and keep `service_role` on the server.
 
 Then add a test that signs in as A and tries B's records, and run the check again.
 

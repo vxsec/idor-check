@@ -98,7 +98,7 @@ Don't invent findings, severities or results. If nothing turned up, list what yo
 - Take the user's identity from the verified session, never from the request.
 - Check the record and the action on the server or in the database. For edits, put the check inside the update itself (`where id = ? and owner_id = ?`), not in a separate lookup first.
 - Block changes to owner, team and role columns unless the user is allowed.
-- Supabase: RLS on for every table. Select, insert, update and delete policies tied to `auth.uid()`. Drop `using (true)` on every table that isn't meant to be public. `with check` on updates. Keep service_role on the server.
+- Supabase: RLS on for every table. Only the policies the app needs (select, insert, update or delete), each tied to `auth.uid()`; no extra permissions. Drop `using (true)` on every table that isn't meant to be public. `with check` on updates. Keep service_role on the server.
 - Keep sharing that's meant to work, working.
 
 Then add a test that logs in as A and tries B's records, watch it fail on the old code, apply the fix, and run idor-check again with the same config.
