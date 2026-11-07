@@ -1,26 +1,26 @@
 # idor-check
 
-**Instructions and a test script that let Claude Code check your app for IDOR and fix it.** Paste this into Claude Code inside your project:
+**Instructions and a test script that let your AI coding agent check your app for IDOR and fix it.** Paste this into an agent that can run commands (for example Claude Code, Cursor or Codex) inside your project:
 
 ```
 Read https://github.com/Yxsuf1/idor-check and follow its AGENTS.md to check this app for IDOR. Show me proof for anything you find, and fix it after I say yes.
 ```
 
-IDOR is when one user can read or change another user's data by changing an ID. Every app checks access differently, so there is no one-size scanner for it. This repo gives Claude a procedure that starts from your code instead:
+IDOR is when one user can read or change another user's data by changing an ID. Every app checks access differently, so there is no one-size scanner for it. This repo gives your agent a procedure that starts from your code instead:
 
-1. **Map access.** Claude reads how login works, your database rules, and every route, server action and query that takes an ID, and writes down who should see what. It asks you when a rule is unclear, because shared-by-design is not a bug.
+1. **Map access.** The agent reads how login works, your database rules, and every route, server action and query that takes an ID, and writes down who should see what. It asks you when a rule is unclear, because shared-by-design is not a bug.
 2. **Prove it.** It runs `idor-check.mjs` with two throwaway test accounts on your local or staging copy: signed in as user A, it asks for user B's records, and does the same logged out. Routes the script can't replay (POST, downloads, GraphQL) it tests by hand the same way.
 3. **Report.** Proven holes come with the request that got in and what came back. What it saw in the code but couldn't run, and what it couldn't decide, are listed separately.
 4. **Ask, fix, re-test.** It changes nothing until you say yes. Then it fixes the code or database rules, adds a test where A tries B's records, and re-runs the same checks to show each hole now refused.
 
-It never deploys. The full procedure is in [AGENTS.md](AGENTS.md) and [SKILL.md](.claude/skills/idor-check/SKILL.md).
+It never deploys. The procedure is in [AGENTS.md](AGENTS.md), the shared instructions file many coding agents read; `CLAUDE.md` points there too. Tested with Claude Code.
 
 > [!IMPORTANT]
 > Only test apps you own or have written permission to test. Use a local or staging copy with throwaway test accounts, never real customer data.
 
-### Install as a skill
+### Install as a Claude Code skill
 
-To keep it in a project, copy the skill folder; it fetches the script itself when it runs:
+Optional. To keep it in a project, copy the skill folder; it fetches the script itself when it runs:
 
 ```bash
 git clone https://github.com/Yxsuf1/idor-check
@@ -31,11 +31,11 @@ Then ask Claude Code to "check this app for IDOR".
 
 ### Testing by hand
 
-No Claude Code? [How to test your app for IDOR](https://vaultxsec.com/guides/how-to-test-for-idor/) walks through a five-minute two-account test, a Supabase RLS check, and a fix prompt you can give any AI coding tool.
+No coding agent? [How to test your app for IDOR](https://vaultxsec.com/guides/how-to-test-for-idor/) walks through a five-minute two-account test, a Supabase RLS check, and a fix prompt you can give any AI coding tool.
 
 ## The helper script
 
-`idor-check.mjs` is what Claude runs in step 2. You can also run it yourself. It's one file, Node 18+, no dependencies, read-only unless you pass `--writes`, and it exits with code 1 when it finds a hole, so it can run in CI against staging.
+`idor-check.mjs` is what the agent runs in step 2. You can also run it yourself. It's one file, Node 18+, no dependencies, read-only unless you pass `--writes`, and it exits with code 1 when it finds a hole, so it can run in CI against staging.
 
 ```bash
 cp examples/my-app.json my-app.local.json   # git-ignored; set baseUrl, the two logins and B's record ID
