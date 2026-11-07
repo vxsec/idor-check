@@ -1,11 +1,9 @@
 ---
-name: one-number-check
-description: Check an app for the one-number hack (IDOR / broken object-level authorization), open Supabase tables, and secrets shipped in the page code. Use when someone asks whether one account can read, change, delete or download another account's records, or asks you to "check my app" before launch. Reads the real code, runs the one-number-check script against a local or staging copy with two test accounts, and reports only what it can prove.
+name: idor-check
+description: Check an app for IDOR (insecure direct object references / broken object-level authorization), open Supabase tables, and secrets shipped in the page code. Use when someone asks whether one account can read, change, delete or download another account's records, or asks you to "check my app" before launch. Reads the real code, runs the idor-check script against a local or staging copy with two test accounts, and reports only what it can prove.
 ---
 
-# One-number check
-
-From the video where changing one number in a link showed a stranger's bank statement. Yusuf | VXSec, vaultxsec.com.
+# idor-check
 
 The bug in one line: the app checks that you're logged in, but never checks that the thing you asked for is yours. Your job is to find every place that's true in this app, prove it, and fix it. Don't hand back a generic checklist instead of looking.
 
@@ -50,7 +48,7 @@ A query without an owner filter isn't automatically a bug. The check may live in
 
 ## 3. Prove it with the script
 
-The kit includes `one-number-check.mjs`. Node 18+, no installs. Set it up with the user:
+The repo includes `idor-check.mjs`. Node 18+, no installs. Set it up with the user:
 
 1. Run the app locally or on staging. Make two throwaway test accounts, A and B, and give B at least one private record in each table that matters (an invoice, a note, a file).
 2. Copy `examples/my-app.json` to `my-app.local.json` (git-ignored) and fill in:
@@ -60,11 +58,11 @@ The kit includes `one-number-check.mjs`. Node 18+, no installs. Set it up with t
    - `adminRoutes`: routes only admins should reach.
    - `supabase.url`: only if the script can't find it in the page. It finds the anon key itself.
 3. Run it read-only first:
-   `node one-number-check.mjs --config my-app.local.json`
+   `node idor-check.mjs --config my-app.local.json`
 4. If that's clean, or the user wants edits and self-promotion tested, run it on test data with writes on:
-   `node one-number-check.mjs --config my-app.local.json --writes`
+   `node idor-check.mjs --config my-app.local.json --writes`
    The edit test writes a row's current value back into it. The data stays the same, but triggers and webhooks can still fire, so test data only. The admin test changes A's own role, always sends the old value back and reads it to confirm. If it can't confirm, it says exactly what to restore. Pass that on, word for word.
-5. Anything that isn't a local or private-network address is refused unless the user adds `--i-own-this-app`. Only add it when they've confirmed the app is theirs. Tables that are public on purpose go under `supabase.publicTables`.
+5. The script resolves every hostname and refuses any target that points at a public address unless the user adds `--i-own-this-app`. Only add it when they've confirmed the app is theirs. A hosted Supabase project must be listed as `supabase.url` in the config; one found only in the page is skipped. Use test passwords of 12+ characters so they're masked reliably in the output. Tables that are public on purpose go under `supabase.publicTables`.
 
 What the script checks:
 
@@ -97,7 +95,7 @@ Don't invent findings, severities or results. If nothing turned up, list what yo
 - Supabase: RLS on for every table. Select, insert, update and delete policies tied to `auth.uid()`. Drop every `using (true)`. `with check` on updates. Keep service_role on the server.
 - Keep sharing that's meant to work, working.
 
-Then add a test that logs in as A and tries B's records, watch it fail on the old code, apply the fix, and run the one-number-check script again. Report the actual commands and results. Don't deploy.
+Then add a test that logs in as A and tries B's records, watch it fail on the old code, apply the fix, and run idor-check again. Report the actual commands and results. Don't deploy.
 
 ## References
 

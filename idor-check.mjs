@@ -1,22 +1,25 @@
 #!/usr/bin/env node
-// one-number-check: does your app hand one user another user's data?
+// idor-check: can one user of your app read or change another user's data?
 // Zero dependencies. Node 18+. Read-only unless you pass --writes.
 // Only run it against an app you own or have written permission to test.
 //
-//   node one-number-check.mjs --config my-app.json [--writes] [--i-own-this-app] [--json report.json]
+//   node idor-check.mjs --config my-app.json [--writes] [--i-own-this-app] [--json report.json]
 //
 // Results: FAIL = a hole, with the request and response as proof. PASS = blocked.
 //          UNSURE = couldn't tell (error, setup problem, not enough test data). INFO = worth knowing.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
+import httpMod from "node:http";
+import httpsMod from "node:https";
 
 // ---------- args + config ----------
 const args = process.argv.slice(2);
 const flag = (f) => args.includes(f);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
 if (flag("--help") || !opt("--config")) {
-  console.log("usage: node one-number-check.mjs --config my-app.json [--writes] [--i-own-this-app] [--json report.json] [--delay 300]");
+  console.log("usage: node idor-check.mjs --config my-app.json [--writes] [--i-own-this-app] [--json report.json] [--delay 300]");
   process.exit(flag("--help") ? 0 : 2);
 }
 // "${NAME}" in the config is replaced with the environment variable NAME, so passwords stay out of files.
@@ -35,24 +38,40 @@ const MAX_REQ = cfg.maxRequests ?? 400;
 const PUBLIC_TABLES = new Set(cfg.supabase?.publicTables || []);
 
 // ---------- safety gate ----------
-// Without --i-own-this-app, only local and private-network addresses are allowed. Every request is
-// checked against the allowed origins right before it is sent, so a route can't point somewhere else.
-function isLocal(host) {
-  host = host.replace(/^\[|\]$/g, "");
-  if (host === "localhost" || /\.(localhost|test|local)$/.test(host)) return true;
-  if (isIP(host) === 6) return host === "::1";
-  if (isIP(host) !== 4) return false; // a name like 127.example.com is NOT local
-  return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0$)/.test(host);
+// Without --i-own-this-app, every address a hostname resolves to must be loopback or private. The
+// checked addresses are pinned and reused for the actual requests, so DNS can't change the answer
+// in between. Every request is also checked against the allowed origins right before it's sent.
+function localAddress(ip) {
+  if (isIP(ip) === 6) {
+    const v = ip.toLowerCase();
+    const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/); if (mapped) return localAddress(mapped[1]);
+    return v === "::1" || /^f[cd][0-9a-f]{2}:/.test(v);
+  }
+  if (isIP(ip) !== 4) return false;
+  return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip) || ip === "0.0.0.0"; // never 169.254 (cloud metadata)
+}
+const TEST_DNS = process.env.IDOR_CHECK_TEST_DNS ? JSON.parse(process.env.IDOR_CHECK_TEST_DNS) : null; // tests only: {"host": ["1.2.3.4"]}
+const pinned = new Map(); // hostname -> [{address, family}]
+async function resolveAll(host) {
+  if (isIP(host)) return [{ address: host, family: isIP(host) }];
+  if (TEST_DNS?.[host]) return TEST_DNS[host].map((a) => ({ address: a, family: isIP(a) }));
+  try { return await lookup(host, { all: true }); } catch { return []; }
 }
 const allowed = new Set();
-function allowOrigin(u, why) {
+async function allowOrigin(u, why) {
   const url = new URL(u);
   if (!["http:", "https:"].includes(url.protocol)) die(`${why}: only http and https addresses.`);
-  if (!isLocal(url.hostname) && !OWN) die(`Refusing to test ${url.hostname} (${why}): not a local address.\nIf this is YOUR app (or you have written permission), run again with --i-own-this-app.\nBest: test a local or staging copy with throwaway test accounts, never real customer data.`);
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const addrs = await resolveAll(host);
+  if (!addrs.length) die(`Can't find ${host} (${why}). Check the address.`);
+  const publicOnes = addrs.filter((a) => !localAddress(a.address)).map((a) => a.address);
+  if (publicOnes.length && !OWN) die(`Refusing to test ${host} (${why}): it points at ${publicOnes.join(", ")}, which is not a local or private address.\nIf this is YOUR app (or you have written permission), run again with --i-own-this-app.\nBest: test a local or staging copy with throwaway test accounts, never real customer data.`);
+  pinned.set(host, addrs);
   allowed.add(url.origin);
+  console.log(`target: ${url.origin} (${addrs.map((a) => a.address).join(", ")}) from ${why}`);
 }
-allowOrigin(BASE, "baseUrl");
-if (cfg.supabase?.url) allowOrigin(cfg.supabase.url, "supabase.url");
+await allowOrigin(BASE, "baseUrl");
+if (cfg.supabase?.url) await allowOrigin(cfg.supabase.url, "supabase.url");
 function routeUrl(path) {
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) die(`config: route "${path}" must start with a single "/"`);
   const u = new URL(path, BASE + "/");
@@ -67,7 +86,7 @@ const KNOWN_SECRETS = new Set(); // filled with tokens from the page and the tes
 const randomLooking = (v) => v.length >= 24 && /[A-Za-z]/.test(v) && /\d/.test(v) && !/^\d{4}-\d\d-\d\d/.test(v) && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v);
 function redact(text) {
   let out = String(text);
-  for (const k of KNOWN_SECRETS) if (k && k.length >= 6) out = out.split(k).join(mask(k));
+  for (const k of [...KNOWN_SECRETS].sort((a, b) => b.length - a.length)) if (k && k.length >= 3) out = out.split(k).join(mask(k));
   return out
     .replace(/[A-Za-z0-9_\-+/=.]{24,}/g, (m) => (randomLooking(m) && !m.includes("…") ? mask(m) : m))
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, (m) => mask(m))
@@ -84,12 +103,22 @@ async function http(method, url, headers = {}, body) {
   if (++sent > MAX_REQ) throw new Error(`stopped at maxRequests (${MAX_REQ})`);
   const wait = last + DELAY - Date.now(); if (wait > 0) await sleep(wait);
   last = Date.now();
-  try {
-    const r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000), redirect: "manual" });
-    const text = await r.text();
-    let json; try { json = JSON.parse(text); } catch { json = undefined; }
-    return { status: r.status, text, json };
-  } catch (e) { return { status: 0, text: String(e.message || e), json: undefined }; }
+  const u = new URL(url), host = u.hostname.replace(/^\[|\]$/g, "");
+  const addrs = pinned.get(host);
+  if (!addrs) return { status: 0, text: `blocked: ${host} was never checked`, json: undefined };
+  // Connect only to the addresses checked at startup (no second DNS lookup).
+  const pinnedLookup = (_h, opts, cb) => { if (opts?.all) cb(null, addrs); else cb(null, addrs[0].address, addrs[0].family); };
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  return new Promise((resolve) => {
+    const req = (u.protocol === "https:" ? httpsMod : httpMod).request(u, { method, headers: { ...headers, ...(payload ? { "content-length": Buffer.byteLength(payload) } : {}) }, lookup: pinnedLookup, timeout: 15000 }, (res) => {
+      const chunks = []; res.on("data", (c) => chunks.push(c));
+      res.on("end", () => { const text = Buffer.concat(chunks).toString(); let json; try { json = JSON.parse(text); } catch { json = undefined; } resolve({ status: res.statusCode, text, json }); });
+    });
+    req.on("timeout", () => req.destroy(new Error("timed out after 15s")));
+    req.on("error", (e) => resolve({ status: 0, text: String(e.message || e), json: undefined }));
+    if (payload) req.write(payload);
+    req.end();
+  });
 }
 const ok2xx = (r) => r.status >= 200 && r.status < 300;
 const denied = (r) => [401, 403, 404].includes(r.status);
@@ -170,6 +199,7 @@ const accounts = {};
 async function signIn(label, a) {
   if (!a) return null;
   for (const v of [a.password, a.token]) if (v) KNOWN_SECRETS.add(v);
+  if (a.password && a.password.length < 12) console.log(`note: test account ${label}'s password is short. Use 12+ characters so it can be hidden reliably in the output.`);
   const bearer = (h) => (h?.authorization || h?.Authorization || "").replace(/^Bearer\s+/i, "") || null;
   if (a.token) return { label, token: a.token, uid: a.userId || jwtClaims(a.token)?.sub, headers: { ...(a.headers || {}), authorization: `Bearer ${a.token}` } };
   if (a.headers) { const t = bearer(a.headers); return { label, token: t, uid: a.userId || (t && jwtClaims(t)?.sub), headers: a.headers }; }
@@ -347,13 +377,19 @@ async function checkSupabase() {
 }
 
 // ---------- run ----------
-console.log(`one-number-check on ${BASE}${WRITES ? "  (write tests ON: test data only)" : "  (read-only)"}`);
+console.log(`idor-check on ${BASE}${WRITES ? "  (write tests ON: test data only)" : "  (read-only)"}`);
 const files = await fetchBundle();
 console.log(`read ${files.size} page/script file(s)`);
 const found = await scanSecrets(files);
 if (!ANON && found.anonKey) ANON = found.anonKey;
 if (!SB && ANON) SB = found.supabaseUrl || null;
-if (SB && !allowed.has(SB)) allowOrigin(SB, "Supabase project found in your page");
+if (SB && !allowed.has(SB)) {
+  // Found in the page, not in your config: only used if every address is local. Anything else must be
+  // listed as supabase.url in your config, even with --i-own-this-app, so consent covers each origin.
+  const host = new URL(SB).hostname, addrs = await resolveAll(host);
+  if (addrs.length && addrs.every((a) => localAddress(a.address))) await allowOrigin(SB, "Supabase project found in your page");
+  else { report("UNSURE", "supabase", `your page talks to ${new URL(SB).origin}, which isn't in your config. If it's your project, add "supabase": { "url": "${new URL(SB).origin}" } to the config and run again. Skipping the database checks.`); SB = null; }
+}
 accounts.a = await signIn("A", cfg.accounts?.a);
 accounts.b = await signIn("B", cfg.accounts?.b);
 await checkRoutes();
@@ -363,6 +399,6 @@ if (!WRITES && SB) report("INFO", "write tests", "skipped. Re-run with --writes 
 
 const count = (v) => results.filter((r) => r.verdict === v).length;
 console.log(`\n${count("FAIL")} hole(s) found, ${count("PASS")} checks passed, ${count("UNSURE")} unsure. ${sent} requests sent.`);
-if (count("FAIL")) console.log("Paste the FAIL lines into Claude, Cursor or Lovable with the fix prompt from the README, then run this again.\nRecognised keys and tokens are hidden. Not every secret can be recognised, and your test accounts' data is shown, so read it first and use test data only.");
+if (count("FAIL")) console.log("See \"Fixing findings\" in the README, fix, then run this again.\nRecognised keys and tokens are hidden. Not every secret can be recognised, and your test accounts' data is shown, so read it first and use test data only.");
 if (opt("--json")) writeFileSync(opt("--json"), JSON.stringify({ target: BASE, writes: WRITES, results }, null, 2));
 process.exit(count("FAIL") ? 1 : 0);

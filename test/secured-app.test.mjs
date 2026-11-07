@@ -16,13 +16,14 @@ const TOK = Object.fromEntries(Object.values(USERS).map((u) => [jwt({ sub: u.id,
 let notes, members, board;
 const reset = () => { notes = [{ id: 1, owner_id: USERS.a.id, body: "alpha note 1001" }, { id: 2, owner_id: USERS.b.id, body: "bravo private memo" }]; members = Object.values(USERS).map((u) => ({ user_id: u.id, role: u.role })); board = [{ id: 1, text: "welcome" }]; };
 
-function serve(leaky = false) {
+function serve(leaky = false, opts = {}) {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://x"); const send = (c, o, t = "application/json") => { res.writeHead(c, { "content-type": t }); res.end(typeof o === "string" ? o : JSON.stringify(o)); };
     const body = await new Promise((r) => { let s = ""; req.on("data", (c) => (s += c)); req.on("end", () => r(s ? JSON.parse(s) : null)); });
     const user = TOK[(req.headers.authorization || "").replace("Bearer ", "")];
     if (url.pathname === "/") return send(200, '<script type="module" src="/app.js"></script>', "text/html");
-    if (url.pathname === "/app.js") return send(200, `import { KEY } from "./config.js"; export const SUPABASE_ANON_KEY = '${ANON}';`, "text/javascript");
+    if (url.pathname === "/app.js") return send(200, `import { KEY } from "./config.js"; export const SUPABASE_ANON_KEY = '${ANON}';${opts.remoteSb ? ` const SB = "https://abcdefghijabcdefghij.supabase.co";` : ""}`, "text/javascript");
+    if (url.pathname === "/api/echo-pw") return user ? send(200, { note: `your password is pw-a` }) : send(401, { error: "login" });
     if (url.pathname === "/config.js") return send(200, `export const KEY = '${ANON}';${leaky ? " export const ADMIN_TOKEN = 'adm_secret_abc';" : ""}`, "text/javascript");
     if (url.pathname === "/auth/v1/token") { const u = Object.values(USERS).find((x) => x.email === body.email && x.pw === body.password); return u ? send(200, { access_token: Object.keys(TOK).find((k) => TOK[k] === u), user: { id: u.id } }) : send(400, { error: "bad login" }); }
     if (url.pathname === "/rest/v1/board") { if (req.method === "GET") return send(200, board); if (req.method === "PATCH") return leaky ? send(200, board) : send(401, { message: "permission denied" }); }
@@ -51,10 +52,10 @@ function serve(leaky = false) {
 for (const writes of [false, true]) test(`secured app: no false alarms${writes ? " (with --writes)" : ""}`, async () => {
   reset(); const srv = serve(); await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${srv.address().port}`;
-  const dir = mkdtempSync(join(tmpdir(), "onc-")); const cfgPath = join(dir, "c.json");
+  const dir = mkdtempSync(join(tmpdir(), "idor-check-")); const cfgPath = join(dir, "c.json");
   writeFileSync(cfgPath, JSON.stringify({ baseUrl: base, supabase: { url: base, publicTables: ["board"] }, accounts: { a: { email: "a@x.test", password: "pw-a" }, b: { email: "b@x.test", password: "pw-b" } }, routes: [{ path: "/api/notes/{id}", id: "2", ownedBy: "b" }], adminRoutes: ["/api/admin/users"] }));
   const out = await new Promise((resolve) => {
-    const c = spawn(process.execPath, ["one-number-check.mjs", "--config", cfgPath, "--delay", "0", "--json", join(dir, "r.json"), ...(writes ? ["--writes"] : [])]);
+    const c = spawn(process.execPath, ["idor-check.mjs", "--config", cfgPath, "--delay", "0", "--json", join(dir, "r.json"), ...(writes ? ["--writes"] : [])]);
     let stdout = "", stderr = ""; c.stdout.on("data", (d) => (stdout += d)); c.stderr.on("data", (d) => (stderr += d));
     c.on("close", (status) => resolve({ status, stdout, stderr }));
   });
@@ -66,19 +67,19 @@ for (const writes of [false, true]) test(`secured app: no false alarms${writes ?
 });
 
 test("refuses a public host without --i-own-this-app", () => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-")); const cfgPath = join(dir, "c.json");
+  const dir = mkdtempSync(join(tmpdir(), "idor-check-")); const cfgPath = join(dir, "c.json");
   writeFileSync(cfgPath, JSON.stringify({ baseUrl: "https://example.com" }));
-  const out = spawnSync(process.execPath, ["one-number-check.mjs", "--config", cfgPath], { encoding: "utf8" });
+  const out = spawnSync(process.execPath, ["idor-check.mjs", "--config", cfgPath], { encoding: "utf8", env: { ...process.env, IDOR_CHECK_TEST_DNS: JSON.stringify({ "example.com": ["93.184.216.34"] }) } });
   assert.equal(out.status, 2); assert.match(out.stderr, /Refusing to test example\.com/);
 });
 
-async function runAgainst(leaky, extraArgs = [], cfgExtra = {}) {
-  reset(); const srv = serve(leaky); await new Promise((r) => srv.listen(0, "127.0.0.1", r));
-  const base = `http://127.0.0.1:${srv.address().port}`;
-  const dir = mkdtempSync(join(tmpdir(), "onc-")); const cfgPath = join(dir, "c.json"), json = join(dir, "r.json");
-  writeFileSync(cfgPath, JSON.stringify({ baseUrl: base, supabase: { url: base }, accounts: { a: { email: "a@x.test", password: "pw-a" }, b: { email: "b@x.test", password: "pw-b" } }, routes: [{ path: "/api/notes/{id}", id: "2", ownedBy: "b" }], adminRoutes: ["/api/admin/users"], ...cfgExtra, supabase: { ...(cfgExtra.supabase || {}), url: base } }));
+async function runAgainst(leaky, extraArgs = [], cfgExtra = {}, opts = {}) {
+  reset(); const srv = serve(leaky, opts); await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://${opts.host || "127.0.0.1"}:${srv.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "idor-check-")); const cfgPath = join(dir, "c.json"), json = join(dir, "r.json");
+  writeFileSync(cfgPath, JSON.stringify({ baseUrl: base, supabase: { url: base }, accounts: { a: { email: "a@x.test", password: "pw-a" }, b: { email: "b@x.test", password: "pw-b" } }, routes: [{ path: "/api/notes/{id}", id: "2", ownedBy: "b" }], adminRoutes: ["/api/admin/users"], ...cfgExtra, supabase: opts.noSupabaseUrl ? {} : { ...(cfgExtra.supabase || {}), url: base } }));
   const out = await new Promise((resolve) => {
-    const c = spawn(process.execPath, ["one-number-check.mjs", "--config", cfgPath, "--delay", "0", "--json", json, ...extraArgs]);
+    const c = spawn(process.execPath, ["idor-check.mjs", "--config", cfgPath, "--delay", "0", "--json", json, ...extraArgs], { env: { ...process.env, ...(opts.dns ? { IDOR_CHECK_TEST_DNS: JSON.stringify(opts.dns) } : {}) } });
     let stdout = "", stderr = ""; c.stdout.on("data", (d) => (stdout += d)); c.stderr.on("data", (d) => (stderr += d));
     c.on("close", (status) => resolve({ status, stdout, stderr }));
   });
@@ -101,8 +102,9 @@ test("a server error is UNSURE, never PASS", async () => {
 });
 
 test("ownership gate: no staging shortcut, no route escaping the host", () => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-"));
-  const run = (cfg, extra = []) => { const p = join(dir, Math.random() + ".json"); writeFileSync(p, JSON.stringify(cfg)); return spawnSync(process.execPath, ["one-number-check.mjs", "--config", p, ...extra], { encoding: "utf8" }); };
+  const dir = mkdtempSync(join(tmpdir(), "idor-check-"));
+  const DNS = { "staging.example.com": ["93.184.216.34"], "127.example.com": ["93.184.216.34"], "10.0.0.1.nip.io": ["93.184.216.34"], "abc.supabase.co": ["104.18.38.10"], "evil.test": ["93.184.216.34"], "mixed.local": ["127.0.0.1", "93.184.216.34"], "meta.test": ["169.254.169.254"] };
+  const run = (cfg, extra = []) => { const p = join(dir, Math.random() + ".json"); writeFileSync(p, JSON.stringify(cfg)); return spawnSync(process.execPath, ["idor-check.mjs", "--config", p, ...extra], { encoding: "utf8", env: { ...process.env, IDOR_CHECK_TEST_DNS: JSON.stringify(DNS) } }); };
   let r = run({ baseUrl: "https://staging.example.com" });
   assert.equal(r.status, 2); assert.match(r.stderr, /Refusing to test staging\.example\.com/);
   r = run({ baseUrl: "http://127.0.0.1:9", routes: [{ path: "@example.com/", id: "1" }], accounts: {} });
@@ -112,6 +114,12 @@ test("ownership gate: no staging shortcut, no route escaping the host", () => {
   r = run({ baseUrl: "http://127.example.com" });
   assert.equal(r.status, 2); assert.match(r.stderr, /Refusing to test 127\.example\.com/);
   r = run({ baseUrl: "http://10.0.0.1.nip.io" });
+  assert.equal(r.status, 2); assert.match(r.stderr, /Refusing/);
+  for (const host of ["evil.test", "mixed.local", "meta.test"]) {
+    r = run({ baseUrl: `http://${host}` });
+    assert.equal(r.status, 2, host); assert.match(r.stderr, new RegExp(`Refusing to test ${host.replace(".", "\\.")}`), host);
+  }
+  r = run({ baseUrl: "http://169.254.169.254" });
   assert.equal(r.status, 2); assert.match(r.stderr, /Refusing/);
   r = run({ baseUrl: "http://127.0.0.1:9", supabase: { url: "https://abc.supabase.co" } });
   assert.equal(r.status, 2); assert.match(r.stderr, /Refusing to test abc\.supabase\.co/);
@@ -136,4 +144,26 @@ test("short plain-text answers are UNSURE, not PASS; public table with no owner 
   const safe = await runAgainst(false, ["--writes"], { supabase: { publicTables: ["board"] } });
   assert.match(safe.stdout, /PASS\s+open table write: the public key can't change rows in "board"/);
   assert.match(safe.stdout, /0 hole\(s\) found/);
+});
+
+test("pinning: a made-up name pinned to the local server works end to end", async () => {
+  const out = await runAgainst(false, [], { supabase: { publicTables: ["board"] } }, { host: "myapp.test", dns: { "myapp.test": ["127.0.0.1"] } });
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(out.stdout, /target: http:\/\/myapp\.test:\d+ \(127\.0\.0\.1\)/);
+  assert.match(out.stdout, /0 hole\(s\) found/);
+});
+
+test("a Supabase project found only in the page is not tested unless it's in the config", async () => {
+  const out = await runAgainst(false, [], {}, { remoteSb: true, noSupabaseUrl: true, dns: { "abcdefghijabcdefghij.supabase.co": ["104.18.38.10"] } });
+  assert.match(out.stdout, /UNSURE supabase: your page talks to https:\/\/abcdefghijabcdefghij\.supabase\.co, which isn't in your config/);
+  assert.doesNotMatch(out.stdout, /target: https:\/\/abcdefghij/);
+  const own = await runAgainst(false, ["--i-own-this-app"], {}, { remoteSb: true, noSupabaseUrl: true, dns: { "abcdefghijabcdefghij.supabase.co": ["104.18.38.10"] } });
+  assert.match(own.stdout, /isn't in your config/);
+});
+
+test("a short test password echoed back is hidden", async () => {
+  const out = await runAgainst(true, [], { adminRoutes: ["/api/echo-pw"] });
+  assert.match(out.stdout, /FAIL\s+admin route: as A, a normal user gets data from \/api\/echo-pw/);
+  assert.match(out.stdout, /password is short/);
+  for (const text of [out.stdout, out.json]) assert.doesNotMatch(text, /pw-a/);
 });

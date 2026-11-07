@@ -1,5 +1,6 @@
-{ "name": "one-number-check", "version": "0.1.0", "private": true, "type": "module",
-  "description": "Check your own app for the one-number hack (IDOR), open Supabase tables, and secrets in the page code.",
-  "bin": { "one-number-check": "one-number-check.mjs" },
+{ "name": "idor-check", "version": "0.2.0", "private": true, "type": "module",
+  "description": "Test a web app for IDOR (broken object-level authorization) with two test accounts. Also checks admin routes, Supabase tables open to the anon key, and secrets in the front-end bundle.",
+  "bin": { "idor-check": "idor-check.mjs" },
   "engines": { "node": ">=18" },
+  "license": "MIT",
   "scripts": { "test": "node --test test/*.test.mjs" } }

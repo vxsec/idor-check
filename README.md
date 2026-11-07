@@ -1,98 +1,160 @@
-# one-number-check
+# idor-check
 
-In the video I changed one number in a link and got a stranger's bank statement. This kit checks your own app for that bug and the ones that usually come with it, and gives you proof and a fix.
+**Test a web app for IDOR with two test accounts.** idor-check signs in as user A and user B, then asks for B's records as A and as a logged-out visitor. If the server hands them over, you get the exact request and response as proof.
 
-Yusuf | VXSec · vaultxsec.com · @vaultxsec
+It also checks admin-only routes, Supabase tables that the public anon key can read or write, users promoting themselves to admin, and secrets shipped in the front-end bundle.
 
-This is the free check. Want the full test done for you, with proof, fixes and retests? Join the waitlist: [vaultxsec.com/hack-my-app](https://vaultxsec.com/hack-my-app)
+- One file, no dependencies, Node 18+
+- Read-only by default; write tests only with `--writes`
+- Talks only to local or private addresses unless you pass `--i-own-this-app`
+- Exit code 1 when it finds a hole, so it can run in CI against staging
 
-It's three things:
+> [!IMPORTANT]
+> Only test apps you own or have written permission to test. Use a local or staging copy with throwaway test accounts, never real customer data.
 
-- **`one-number-check.mjs`**: a script that logs in as two test users and tries to get one user's data as the other. It also checks which Supabase tables anyone can read, whether a normal user can reach admin routes, and whether your page code ships secrets. Node 18+, nothing to install.
-- **A Claude Code skill** (`.claude/skills/one-number-check/`): drop it in your project and ask Claude to check your app. It reads your code, follows every ID, runs the script, and reports only what it proved.
-- **The guide** (`guide/one-number-hack.pdf`): the bug in one line, "Let Claude do it" in one paste, "Do it yourself" in five minutes, and the fix prompt for Claude, Cursor or Lovable.
+## Quick start
 
-**Only test apps you own or have written permission to test.** Use a local or staging copy and throwaway accounts, never real customer data. The script only talks to local and private-network addresses unless you pass `--i-own-this-app`, and every request is checked against the addresses in your config before it goes out.
+```bash
+git clone https://github.com/Yxsuf1/idor-check
+cd idor-check
+cp examples/my-app.json my-app.local.json   # git-ignored
+```
 
-## 5 minutes
+1. Run your app locally or on staging. Sign up two test accounts, A and B, with passwords of 12+ characters.
+2. As B, create something private (an invoice, a note, an upload) and copy its ID.
+3. In `my-app.local.json`, set `baseUrl`, the two logins under `accounts`, and B's ID under `routes`.
+4. Run it:
 
-1. Run your app locally (or on staging). Sign up two test accounts, A and B. As B, create something private: an invoice, a note, an upload. Copy its ID.
-2. Copy the example config and fill it in:
+```bash
+APP_A_PASSWORD=... APP_B_PASSWORD=... node idor-check.mjs --config my-app.local.json
+```
 
-   ```
-   cp examples/my-app.json my-app.local.json
-   ```
+On test data, add `--writes` to also test whether A can edit B's rows or make themselves admin.
 
-   Put your app's address in `baseUrl`, the two test logins under `accounts`, and B's ID under `routes`. List routes that should be admin-only under `adminRoutes`. On Supabase the script finds your project and public key in the page by itself.
-3. Run it:
+## Example output
 
-   ```
-   APP_A_PASSWORD=... APP_B_PASSWORD=... node one-number-check.mjs --config my-app.local.json
-   ```
+From a run against a deliberately vulnerable Supabase test app:
 
-4. Read the result. Every **FAIL** comes with the request that got in and the start of what came back (first 240 characters):
+```
+idor-check on http://127.0.0.1:8787  (write tests ON: test data only)
 
-   ```
-   FAIL   cross-account: as A, not the owner gets B's record at /rest/v1/invoices?id=eq.3.
-          > GET http://127.0.0.1:8787/rest/v1/invoices?id=eq.3  (as A, not the owner)
-          < 200 [{"id":3,"owner_id":"2222…","customer":"Bob Client Fake","amount_cents":99000,...}]
-   ```
+FAIL   cross-account: as A, not the owner gets B's record at /rest/v1/invoices?id=eq.3.
+       > GET http://127.0.0.1:8787/rest/v1/invoices?id=eq.3  (as A, not the owner)
+       < 200 [{"id":3,"owner_id":"2222…","customer":"Bob Client Fake","amount_cents":99000,...}]
 
-   **PASS** means it was blocked. **UNSURE** means the test couldn't decide (a server error, wrong ID, B has no rows in that table, login failed). An error is never counted as a pass. Fix the setup and run it again.
+PASS   cross-account: logged out can't get B's record at /rest/v1/invoices?id=eq.3 (200, empty).
 
-   Keys and tokens it recognises are hidden in the output and in `--json` reports: known key formats, secret-named fields, tokens found in your page, your test accounts' own logins, and long random-looking strings. It can't recognise every secret, and your test accounts' data is shown as proof, so use test data only and read the output before you paste it anywhere.
-5. On test data, run it again with `--writes` to check whether A can edit B's rows and whether A can make themselves admin. The edit test writes a row's current value back into it. That leaves the data as it was, but it can still set off database triggers or webhooks, so use test data. The admin test changes A's own role, always sends the old value back, then reads it again to confirm. If it can't confirm, it tells you exactly what to restore.
+FAIL   self-promotion: A can set their own "role" to "admin" in "members". Old value put back and checked ("user").
+       > PATCH http://127.0.0.1:8787/rest/v1/members?user_i…1111  (as A)
+       < 200 [{"user_id":"1111…","role":"admin"}]
 
-The exit code is 1 when there's a hole, so you can put it in CI against staging.
+PASS   cross-account: A can't see B's rows in "notes" (asked for them directly, got none).
+
+11 hole(s) found, 11 checks passed, 0 unsure. 54 requests sent.
+```
+
+| Result | Meaning |
+|---|---|
+| `FAIL` | A hole, shown with the request that got in and the first 240 characters of the response |
+| `PASS` | Blocked |
+| `UNSURE` | No verdict: server error, login failed, wrong ID, or B has no rows there. Never counted as a pass |
+| `INFO` | Worth knowing, not a finding |
 
 ## What it checks
 
 | Check | How |
 |---|---|
-| One user reads another's record | Loads B's record as B, then as A, then logged out, and compares |
-| Normal user on admin routes | Calls each admin route as A and logged out |
-| Secrets in the page code | Reads your page and its scripts. Flags Supabase service_role keys, Stripe, OpenAI, Anthropic, AWS, GitHub, Slack, email keys, private keys, and named tokens or secrets. Your own app's tokens are tried against your admin routes to show what they open. Third-party keys are never used. |
-| Supabase tables open to anyone | Reads every table with just the public anon key. Tables meant to be public go under `supabase.publicTables` |
-| A sees B's rows (Supabase) | Asks for rows not owned by A, as A, and checks B really has rows there |
-| A edits B's rows (`--writes`) | Writes a row's current value back into one of B's rows as A |
-| A promotes themselves (`--writes`) | Sets A's own `role` / `is_admin`, puts it back, reads it to confirm |
+| Cross-account reads | Loads each configured record as B (the owner), then as A, then logged out, and compares |
+| Admin routes | Calls each route in `adminRoutes` as A and logged out |
+| Secrets in the bundle | Reads the page and its scripts. Flags Supabase `service_role` keys, Stripe, OpenAI, Anthropic, AWS, GitHub, Slack and email-provider keys, private keys, and named tokens. The app's own tokens are tried against the admin routes; third-party keys are reported, never used |
+| Open Supabase tables | Reads every table with only the anon key. Tables that are public on purpose go in `supabase.publicTables` |
+| Supabase cross-account reads | Asks for rows A doesn't own, as A, after confirming B has rows there |
+| Cross-account writes (`--writes`) | Writes a row's current value back into one of B's rows, as A |
+| Self-promotion (`--writes`) | Sets A's own `role` / `is_admin`, restores it, reads it back to confirm |
 
-It goes slowly on purpose: one request at a time, 300 ms apart, at most 400 requests. Change that with `--delay` and `maxRequests`.
+## Configuration
 
-What it doesn't do: test POST, PUT and DELETE routes, file downloads, GraphQL, or team-to-team access. Test those by hand the same way: A's session, B's ID, change only the ID. The skill walks Claude through it.
-
-## Fix it
-
-Paste the FAIL lines into Claude, Cursor or Lovable with this (read them first: recognised keys are hidden, not every secret is):
-
-```
-Go through every route, API endpoint, server action and database query in this app
-that takes an ID or record key from the user (URL, query string, body, headers).
-For each one, make sure the server checks that the logged-in user owns that record
-(or is allowed to see it) before reading, updating or deleting it. Never trust an
-ID or user id sent from the browser. If this app uses Supabase, enable Row Level
-Security on every table, drop or rewrite every existing policy that allows all rows
-(for example using (true)), since policies combine with OR, and make select, insert,
-update and delete policies tied to auth.uid(). List every place you changed and
-every place you couldn't confirm.
-Then write a test that logs in as user A and tries to read, edit and delete
-user B's records, and make it pass.
+```json
+{
+  "baseUrl": "http://localhost:3000",
+  "accounts": {
+    "a": { "email": "test-a@example.com", "password": "${APP_A_PASSWORD}" },
+    "b": { "email": "test-b@example.com", "password": "${APP_B_PASSWORD}" }
+  },
+  "routes": [
+    { "path": "/api/invoices/{id}", "id": "B'S-RECORD-ID", "ownedBy": "b" }
+  ],
+  "adminRoutes": ["/api/admin/users"],
+  "supabase": {}
+}
 ```
 
-Then run the script again. Don't take the AI's word for it.
+| Field | |
+|---|---|
+| `baseUrl` | Your app's local or staging address |
+| `accounts.a`, `accounts.b` | `email` + `password` (Supabase sign-in), a `token`, or raw `headers`. `${NAME}` is read from the environment |
+| `routes` | Routes that take an ID, with one of B's real IDs. Paths must stay on `baseUrl` |
+| `adminRoutes` | Routes only admins should reach |
+| `supabase.url`, `supabase.anonKey` | Optional. Found in the page automatically when the project is local; a hosted project must be listed here |
+| `supabase.publicTables` | Tables meant to be readable by anyone |
+| `maxRequests`, `delayMs` | Request cap (default 400) and pause between requests (default 300 ms) |
 
-The short version, for you or for Claude, is in `guide/one-number-hack.pdf`.
+`examples/supabase-two-accounts.json` is a full Supabase example.
 
-## Use it with Claude Code
+## Options
 
-Copy `.claude/skills/one-number-check/` into your project's `.claude/skills/` and ask: "check this app for the one-number hack". Claude reads your routes and database rules, sets up the config with you, runs the script, and gives you proven findings with fixes. It won't deploy or change your database rules without asking.
+```
+node idor-check.mjs --config <file> [--writes] [--i-own-this-app] [--json <report.json>] [--delay <ms>]
+```
 
-## Tests
+| Flag | |
+|---|---|
+| `--config` | Config file (required) |
+| `--writes` | Run the write and self-promotion tests. Test data only |
+| `--i-own-this-app` | Allow targets that resolve to public addresses |
+| `--json` | Also write the results as JSON |
+| `--delay` | Milliseconds between requests |
 
-`npm test` runs the script against a small fake app set up correctly (expects zero holes, with and without `--writes`) and a leaky copy of it (expects the holes, no tokens in the output, and the role put back). It also checks that a server error never counts as a pass and that public addresses and routes that leave your app are refused. Before release it was also run against a deliberately broken app with five planted holes and one correctly set-up table: it caught all five and left the good table alone.
+## Safety
 
-## Want someone to test it for you?
+- **Targets.** Every hostname is resolved, and all of its addresses must be loopback or private (127/8, 10/8, 172.16/12, 192.168/16, ::1, fc00::/7) unless you pass `--i-own-this-app`. Cloud metadata addresses (169.254/16) are never treated as private. The checked addresses are pinned and reused for every request, so DNS can't change in between.
+- **One origin per consent.** Each request is checked against the configured origins before it is sent. A Supabase project found only in the page is used only if it is local; a hosted one must be in your config.
+- **Pace.** One request at a time, 300 ms apart, at most 400 requests.
+- **Writes.** Off by default. The edit test writes a row's current value back, so data stays the same, but database triggers and webhooks can still fire. The admin test restores the old role and confirms it; if it can't, it prints exactly what to restore.
+- **Redaction.** Recognised keys, tokens and your test passwords are masked in the output and the JSON report. Use 12+ character test passwords so they mask reliably. Not every secret can be recognised, and your test accounts' data is shown as proof, so read the output before sharing it.
 
-vaultxsec.com
+## Limitations
 
-MIT license.
+idor-check tests GET routes and Supabase tables. It does not test POST, PUT or DELETE routes, file downloads, GraphQL, or team-to-team access. Test those by hand the same way: A's session, B's ID, change only the ID, then check both the response and what was saved.
+
+A clean run means these checks passed, not that the app is secure.
+
+## Fixing findings
+
+The fix is the same everywhere: the server takes the user from the verified session, and checks that the user may read or change that specific record before doing it.
+
+- Never trust a user ID, team ID or role sent from the browser.
+- For updates, put the ownership check in the query itself (`where id = ? and owner_id = ?`).
+- Supabase: enable RLS on every table, drop `using (true)` policies on private tables (policies combine with OR), add select, insert, update and delete policies tied to `auth.uid()`, use `with check` on updates, and keep `service_role` on the server.
+
+Then add a test that signs in as A and tries B's records, and run idor-check again.
+
+A step-by-step walkthrough, including manual testing in the browser: [How to test your app for IDOR](https://vaultxsec.com/guides/how-to-test-for-idor/).
+
+## Claude Code skill
+
+`.claude/skills/idor-check/SKILL.md` is a Claude Code skill. Copy it into your project's `.claude/skills/` and ask Claude Code to check the app for IDOR. It maps who should see what from your code, follows every ID through the handlers and database rules, runs idor-check with two test accounts, and reports only what it proved. It does not deploy or change database rules without asking.
+
+## Development
+
+```bash
+npm test
+```
+
+The tests run idor-check against a small correctly-secured app (expects zero holes, with and without `--writes`) and a leaky copy (expects every hole, no tokens in the output, and the role restored). They also check that a server error is never a pass, and that public, mixed and metadata addresses and off-host routes are refused.
+
+## License
+
+MIT
+
+Built by VXSec · [vaultxsec.com](https://vaultxsec.com)
