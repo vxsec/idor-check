@@ -4,6 +4,8 @@ In the reel I changed one number in a link and got a stranger's bank statement. 
 
 Yusuf | VXSec · vaultxsec.com · @vaultxsec
 
+This is the free check. Want the full test done for you, with proof, fixes and retests? Join the waitlist: [vaultxsec.com/hack-my-app](https://vaultxsec.com/hack-my-app)
+
 It's three things:
 
 - **`one-number-check.mjs`**: a script that logs in as two test users and tries to get one user's data as the other. It also checks which Supabase tables anyone can read, whether a normal user can reach admin routes, and whether your page code ships secrets. Node 18+, nothing to install.
