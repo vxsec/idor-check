@@ -1,6 +1,6 @@
 # one-number-check
 
-In the reel I changed one number in a link and got a stranger's bank statement. This kit checks your own app for that bug and the ones that usually come with it, and gives you proof and a fix.
+In the video I changed one number in a link and got a stranger's bank statement. This kit checks your own app for that bug and the ones that usually come with it, and gives you proof and a fix.
 
 Yusuf | VXSec · vaultxsec.com · @vaultxsec
 
